@@ -1,0 +1,79 @@
+param n_suppliers:=10;
+param n_trucks:=5; #1 LDD and 5 HCV
+param n_property:= 2; # wt and volume
+param n_trips:= 5; # five days of week
+
+param distance:
+	1	2	3	4	5	6	7	8	9	10:=
+1	0	419	310	25	49	26	59	26	25	25
+2	419	0	592	445	483	413	421	458	456	455
+3	310	592	0	335	358	288	278	335	333	333
+4	25	445	335	0	30	51	113	7	3.9	3
+5	49	483	358	30	0	75	136	30	28	27
+6	26	413	288	51	75	0	80	52	49	49
+7	59	421	278	113	136	80	0	112	146	145
+8	26	458	335	7	30	52	112	0	4.7	5
+9	25	456	333	3.9	28	49	146	4.7	0	1.6
+10	25	455	333	3	27	49	145	5	1.6	0;
+
+#Rs/truck/hour= for 6 trucks
+param FCT:=
+1	542
+2	577
+3	577
+4	577
+5	577;
+
+#Rs/km for each type of truck (incl km and toll charges average at 3/km
+param VC :=
+1	32
+2	28
+3	28
+4	28
+5	28;
+
+ 
+#average speed of truck in kmph
+param S := 35 ;
+
+#demand is defined over suppliers & wt/wol per week
+param demand:
+	1	2:=
+1	0	0
+2	33.88	27.5
+3	10	25
+4	3.5	10
+5	7.9	11.25
+6	0.75	5
+7	0.4	1.25
+8	1.75	5
+9	2.8	40
+10	1.25	5;
+
+
+#how much of truck capacity can be used
+param teff:= 1;
+
+#truck capacity in terms of trucks and wt / vol
+param capacity:
+	1	2:=
+1	14.5	37
+2	7.6	37
+3	7.6	37
+4	7.6	37
+5	7.6	37;
+
+param tripCost :=
+1 100
+2 100
+3 100
+4 100
+5 100;
+
+#max distance travelled by any truck in a wekek = 16*5*40 = 3200 km per week
+param max_dist:= 3200;
+
+
+
+
+
