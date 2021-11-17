@@ -1,0 +1,40 @@
+        # intialize outputs
+        prop_count = 0
+        possible_assignments, hypo_assignments, possible_conflicts, conflicts  = [], [], [], []
+        # Check to see if the clause and any candidate propositions overlap
+        for prop in self.props:
+            idx = -1
+            clause_logic_list[prop_count] = True
+            can_name_count = 0
+            no_match_flag = True
+            for can_prop in can_props:
+                idx += 1
+                if can_prop.name == prop.name:
+                    no_match_flag = False
+                    can_name_count += 1
+                    # Check to see if overlapping propositions conflict
+                    if can_prop.mode != prop.mode:
+                        clause_logic_list[prop_count] = False
+                        possible_conflicts.append(can_prop)
+                    if can_name_count > 1:
+                        print('Caution: multiple candidate propositions with the same name')
+            # Track possible propositions to assign candidate values if there is no overlap
+            if no_match_flag:
+                hypo_assignments.append(prop)
+                clause_logic_list[prop_count] = 'flag'
+            prop_count += 1
+        # Generate returns
+        log_test_result = any(clause_logic_list)
+        # Check to see if we have no True returns
+        if not log_test_result:
+            for log_result in clause_logic_list:
+                if log_result == 'flag':
+                    pass
+                else:
+                    conflicts = possible_conflicts    # List of conflicts (should match the can_probs input)
+        if len(possible_conflicts) == len(can_props):
+            possible_assignments = hypo_assignments    # Returns possible assignments if every candidate_proposition was contradicted by the clause
+        if rtn_conflicts_only:
+            return conflicts
+        else:
+            return log_test_result, clause_logic_list, hypo_assignments, possible_assignments, conflicts
