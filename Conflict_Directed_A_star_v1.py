@@ -86,7 +86,7 @@ class Component:
         if not domain_modes_to_exclude:
             max_prob = max(self.probs)
             max_index = self.probs.index(max_prob)
-            corr_proposition = Proposition(self.name, self.domain[max_index])
+            corr_proposition = Proposition(self.name, self.domain[max_index], self)
             return corr_proposition
         else:
             possible_domain = list(self.domain)
@@ -346,8 +346,11 @@ def get_components(propositions):
 
     '''
     components = set()
+    if type(propositions) == Proposition:
+        print(set([propositions.component]))
+        return set([propositions.component])
     for prop in propositions:
-        components.add(prop.component)
+            components.add(prop.component)
     return components
 
 def get_component_modes(propositions):
@@ -374,16 +377,18 @@ Satisfaction check / Conflict generation functions
 
 def generate_exhaustive_proposition_sets(model, candidate_propositions):
     '''
-
+    --------------------------------------------------------------------------
     Parameters
-    ----------
+    --------------------------------------------------------------------------
     model : Model class variable
         The model for your system of interest.
+        
     candidate_propositions : set of Proposition class variables
         These candidate_propositions will be compared against the Component class variables that are contained within the model. If there are components in the model that are not in candidate_propositions, then this function will generate all possible proposition assignments for the components that are missing from candidate_propositions. These assignments will then be used to generate an exhaustive list of all possible candidate_proposition sets.
-
+        
+    --------------------------------------------------------------------------
     Returns
-    -------
+    --------------------------------------------------------------------------
     all_can_props : list where each element is a set of Proposition class variables
         Each set is unique and contains a proposition corresponding to every component in the 
 
@@ -401,6 +406,8 @@ def generate_exhaustive_proposition_sets(model, candidate_propositions):
     # (2) If there is an unassigned model component, generate possible assignments for it
         if no_match:
             poss_component_prop_sets.append(model_component.get_remaining_propositions())
+            if model_component.assignable:
+                print('Warning: not all assignable components have a corresponding candidate proposition. Update candidate propositions and try again.')
     # (3) Use the list of possible component assignment sets to generate all possible candidate proposition sets
     if poss_component_prop_sets:
          all_can_prop_bases = list(itertools.product(*poss_component_prop_sets))
@@ -411,8 +418,9 @@ def generate_exhaustive_proposition_sets(model, candidate_propositions):
     else:
         all_can_props.append(candidate_propositions)
     return all_can_props
+  
 
-def logical_test(clause, can_props, multi_can_sets = False, addl_can_props = [], debug_mode = False):
+def logical_test(clause, can_props, debug_mode = False):
     '''
     logical_test(clause, can_props): Tests if the propositions in can_props are logically consistent with the clause.
     ----------------------------------------------------------------------
@@ -425,47 +433,42 @@ def logical_test(clause, can_props, multi_can_sets = False, addl_can_props = [],
         
     debug_mode............ return a more exhaustive set of variables that include many intermediate variables if True
     
-    NOTE: assumes that no two candidate propositions share the same name
+    NOTE: assumes that no two candidate propositions share the same component
     
     ----------------------------------------------------------------------
     Returns
     ----------------------------------------------------------------------
     
         conflicts...............If log_test_result is False, returns a list of the candidate propositions; will be an empty list if there are no conflicts
-        
-        can_props...............A set of proposition class variables, if the routine has added new candidates, then these are included, otherwise it is the same as the input
-        
-        
+                
     ----------------------------------------------------------------------
     Additional returns if debug_mode = True
     ----------------------------------------------------------------------
         
+        can_props...............A set of proposition class variables, these should be the same as the input
         log_test_result.........False if all propositions in Clause.props are contradicted by a proposition in can_props
         clause_logic_list.......A list of logical statements with indices corresponding the the propositions in can_props
-        hypo_assignments....If every candidate proposition conflicted with the clause, returns a list of the propositions in Clause that did not share a name with any candidate propositions (these propositions could be assigned a value can_props)
-
         
     '''
     # generate intermediate variables and initialize outputs
     conflicts = set()
     prop_list = []
-    prop_combos_to_try = []
+    can_prop_list = []
     for prop in clause.props:
         prop_list.append(prop)     # list corresponding to propositions in the set clause.props
     
 
     # (1) Identify propositions in the clause that are contradicted by can_props
-    unassigned_list = []     # list with indices corresonding to prop_list
     clause_logic_list = []    # Each element is False if the corresponding proposition is not enforced by a can_prop
-    unmatched_components = set()   # sett of components who do not have a proposition are assigned by can_props
     possible_conflicts = []
     prop_idx = 0
     for prop in prop_list:    # use the list for iteration to ensure consistent indexes!
         clause_logic_list.append(False)
-        no_match_flag = True
         can_name_count = 0
+        no_match_flag = True
         for can_prop in can_props:
             if can_prop.component == prop.component:
+                can_prop_list.append(can_prop)
                 no_match_flag = False
                 can_name_count += 1
                 # check to see if can_prop and prop share the same mode or conflict
@@ -476,12 +479,9 @@ def logical_test(clause, can_props, multi_can_sets = False, addl_can_props = [],
                     possible_conflicts.append(can_prop)
                 if can_name_count > 1:
                     print('Warning: multiple candidate propositions with the same component')
-        # (2) Identify propositions in the clause whose component is unassigned by can_props
+        # Issue warning if there are propositions in the clause whose component is unassigned by can_props
         if no_match_flag:
-            unassigned_list.append(True)
-            unmatched_components.add(prop.component)
-        else:
-            unassigned_list.append(False)
+            print('Warning: the candidate propositions do not include every component in the clause!')
         prop_idx += 1
     
     # (3) If all clauses are satisfied, then log_test_result is True and there will be no need to assess the hypothetical assignments
@@ -489,82 +489,74 @@ def logical_test(clause, can_props, multi_can_sets = False, addl_can_props = [],
     if log_test_result:
         #print('returning with log_test_result = True')
         if not debug_mode:
-            return (conflicts, can_props)
+            return conflicts
         else:
-            return (conflicts, can_props, log_test_result, clause_logic_list, unmatched_components)     
+            return conflicts, can_props, log_test_result, clause_logic_list
     
-    # (4) if log_test_result is False, then we need to assess if any components are unassigned by cand_props, if they are then we can return hypothetical assignments and will need to call this function again
-    elif any(unassigned_list):
-        # (a) Get all ways to assign possible propositions
-        poss_component_props = []
-        for comp in unmatched_components:
-            new_props = comp.get_remaining_propositions()
-            for prop in new_props:
-                prop.support = clause
-            poss_component_props.append(new_props)
-        prop_combos_to_try = list(itertools.product(*poss_component_props))
-        print('\n')
-        print(clause)
-        print(prop_combos_to_try)
-        # (b) Check each assignment combination for conflicts
-        poss_conflicts = set()
-        consistent_flag = False
-        for prop_combo in prop_combos_to_try:
-            addl_props = set(prop_combo)
-            can_prop_try = addl_props.union(can_props)
-            print(can_prop_try)
-            trial_conflicts, trial_can_props = logical_test(clause, can_prop_try)
-            print(trial_conflicts)
-            if not trial_conflicts:
-                consistent_flag = True
-                conflicts = set()
-                can_props = can_prop_try
-                return conflicts, can_props
-            else:
-                poss_conflicts.union(trial_conflicts)
-        if not consistent_flag:
-            conflicts = conflicts.union(poss_conflicts)
-        # (c) Return results
-        if not debug_mode:
-            return conflicts, can_props
-        else:
-            return conflicts, can_props, log_test_result, clause_logic_list, unmatched_components
-    # (5) if log_test result is False and every element in unassigned_list is False, then we have identified conflicts
+       # (4) if log_test result is False and every element in unassigned_list is False, then we have identified conflicts
     else:
         # Conflicts are those propositions for which clause_logic_list is False and which are associated with an assignable component
         False_indices = [idx for idx, var in enumerate(clause_logic_list) if var == False]
         for idx in False_indices:
             if prop_list[idx].component.assignable:
-                conflicts.add(prop_list[idx])
+                conflicts.add(can_prop_list[idx])
         # Additional conflicts are proposition assignments whose support does not correspond to a given (e.g. does NOT correspond to a known input or output value)
-        for can_prop in can_props:
-            if (can_prop.support != 'Given') and (can_prop.support != 'kernel'):    # can_prop.support is a Clause class variable or 'Given'
-                #print('we are inside the support build')
-                #print(can_prop.support)
-                additional_conflicts = assignable_propositions(can_prop.support.props)
-                #print(additional_conflicts)
-                if additional_conflicts:
-                    for prop in additional_conflicts:
-                        conflicts.add(prop)
+        # for can_prop in can_props:
+        #     if (can_prop.support != 'Given') and (can_prop.support != 'kernel'):    # can_prop.support is a Clause class variable or 'Given'
+        #         #print('we are inside the support build')
+        #         #print(can_prop.support)
+        #         additional_conflicts = assignable_propositions(can_prop.support.props)
+        #         #print(additional_conflicts)
+        #         if additional_conflicts:
+        #             for prop in additional_conflicts:
+        #                 conflicts.add(prop)
         if not debug_mode:
             #print('\n LOOK AT ME \n')
-            return conflicts, can_props
+            return conflicts
         else:
             # print('\n LOOK AT ME \n')
-            return conflicts, can_props, log_test_result, clause_logic_list, unmatched_components  
+            return conflicts, can_props, log_test_result, clause_logic_list
         
+         
 def check_model_for_conflicts(model, candidate_props):
-    conflicts = []
-    for clause in model.clauses:
-       new_conflicts, candidate_props  = logical_test(clause, candidate_props)
-       #print('Candidate_props are: ', candidate_props)
-       #print('Identified conflicts are: ', new_conflicts)
-       #print('there is a new conflict: ')
-       #print(new_conflicts)
-       if new_conflicts:
-           conflicts.append(new_conflicts)
+    '''
+
+    Parameters
+    ----------
+    model : Model class variable
+    
+    candidate_props : a list of sets of Proposition class varibles
+        Each set should exhaustively make assignments to the model components
+
+    Returns
+    -------
+    conflicts : list of Proposition class variables
+        Each of these propositions is a conflict between a proposition in candidate_props and the clauses in the model
+    candidate_props : set of proposition class variables
+        The candidate propositions 
+
+    '''
+    poss_conflicts = set()
+    satisfied_list = []
+    for prop_set in candidate_props:
+        satisfiable = True
+        #print('Looking at the prop_set: ', prop_set)
+        for clause in model.clauses:
+           new_conflicts  = logical_test(clause, prop_set)
+           if new_conflicts:
+               satisfiable = False
+               for conflict in new_conflicts:
+                   poss_conflicts.add(conflict)
+        if satisfiable:
+            satisfied_list.append(True)
+        else:
+            satisfied_list.append(False)
+    if any(satisfied_list):
+        return []
+    else:
+        return [poss_conflicts]
         
-    return conflicts, candidate_props
+
 
 '''
 Functions for kernel generation and processing
@@ -614,10 +606,17 @@ def update_kernel_diagnoses(kernel_diagnoses, conflicts):
         for kernel in elim_list:
             kernel_diagnoses.remove(kernel)
         
-    #2. Add remaining elements in conflict to the remaining kernels in dummy_kernel_diagnoses to form new kernels
+    #2. Add remaining elements in conflict to the remaining kernels in kernel_diagnoses to form new kernels
         for rem_elem in candidate_diagnoses:
             for rem_kernel in kernel_diagnoses:
-                    # remove rem_kernal from the diagnoses and add item to it
+                # remove rem_kernal from the diagnoses and add item to it
+                rem_kernel_components = get_components(rem_kernel)
+                components_separate = True
+                # Only fuse if not assignining multiple things to the same component
+                for component in rem_kernel_components:
+                    if component == rem_elem.component:
+                        components_separate = False
+                if components_separate:
                     addition = set()
                     addition.add(rem_elem)
                     for elem in rem_kernel:
@@ -625,26 +624,24 @@ def update_kernel_diagnoses(kernel_diagnoses, conflicts):
                     output_kernel_diagnoses.append(addition)
     return output_kernel_diagnoses
 
-def all_kernel_diagnoses(conflicts):
+def all_kernel_diagnoses(conflicts, kernel_diagnoses = []):
     # Simply call the update_kernel_diagnoses functions on all conflict sets within conflicts
     # and update the diagnoses each time.
-    kernel_diagnoses = []
     for conflict in conflicts:
         kernel_diagnoses = update_kernel_diagnoses(kernel_diagnoses, conflict)
     return kernel_diagnoses
 
-def find_highest_probability_diagnosis_set(kernels):
+def find_highest_probability_kernel_set(kernels):
     max_prob = 0
-    for kernel in kernels:
-        diagnosis = return_diagnoses(kernel)
-        diagnosis_prob = 1
-        for prop in diagnosis:
-            diagnosis_prob *= prop.prob
-        if diagnosis_prob > max_prob:
-            corr_kernel = kernel
-            max_diagnosis = diagnosis
-            max_prob = diagnosis_prob
-    return max_diagnosis, corr_kernel
+    corr_kernel = None
+    for kernel_set in kernels:
+        kernel_prob = 1
+        for kernel in kernel_set:
+            kernel_prob *= kernel.prob
+        if kernel_prob > max_prob:
+            corr_kernel = kernel_set
+            max_prob = kernel_prob
+    return corr_kernel
 
 
 '''
@@ -661,7 +658,7 @@ def build_PCU_gate_clause(input_components, AND_gate_component, output_component
     # Get the necessary propositions for the AND gate component
     not_AND_gate_prop = Proposition(AND_gate_component.name, 0, AND_gate_component)
     AND_gate_prop = Proposition(AND_gate_component.name, 1, AND_gate_component)
-    # Get necessary props for the output comopnent
+    # Get necessary props for the output component
     not_output_prop = Proposition(output_component.name, 0, output_component)
     output_prop = Proposition(output_component.name, 1, output_component)
     # Get the necessary propositions for the input components
@@ -769,6 +766,194 @@ def build_Camera_clauses(input_component, camera, output_component):
 
 
 
+
+
+# Use our functions to build our model
+
+# testP1 = build_Power_Relay_clauses(A, P1, V)
+
+# testP2 = build_Power_Relay_clauses(B, P2, W)
+
+# testP3 = build_Power_Relay_clauses(C, P3, X)
+
+# testPCU1 = build_PCU_gate_clause([V,W],PCU1, Y)
+
+# testPCU2 = build_PCU_gate_clause([W,X],PCU2, Z)
+
+# testC1 = build_Camera_clauses(Y,C1,D)
+
+# testC2 = build_Camera_clauses(Z,C2,E)
+
+'''
+Define simplified problem where V and W values are known
+'''
+# V = Component('V',(1,),(1,), False)
+# W = Component('W',(1,),(1,), False)
+# D = Component('D',(0,),(1,), False)
+
+
+
+# # PCU1 propositions and clauses
+# props = [Proposition('PCU1',0, PCU1), Proposition('Y', 0, Y), Proposition('V', 1, V)]
+# PCU1a = Clause('PCU1a',set(props))
+
+# props = [Proposition('PCU1',0, PCU1), Proposition('Y', 0, Y), Proposition('W', 1, W)]
+# PCU1b = Clause('PCU1b',set(props))
+
+# props = [Proposition('PCU1',0, PCU1), Proposition('V', 0, V), Proposition('W', 0, W),Proposition('Y', 1, Y)]
+# PCU1c = Clause('PCU1c',set(props))
+
+# props = [Proposition('PCU1', 1, PCU1), Proposition('Y', 0, Y) , Proposition('V', 1, V), Proposition('W', 1, W)]
+# PCU1d = Clause('PCU1d',set(props))
+
+# PCU1_clauses = set([PCU1a, PCU1b, PCU1c, PCU1d])
+
+# # C1 propositions and clauses
+# props = [Proposition('C1',0, C1), Proposition('Y', 0, Y), Proposition('D', 1, D)]
+# C1a = Clause('C1a', set(props))
+
+# props = [Proposition('C1',0, C1), Proposition('D', 0, D), Proposition('Y', 1, Y)]
+# C1b = Clause('C1b', set(props))
+
+# C1_clauses = set([C1a, C1b])
+
+# # Combine all clauses into a model
+# all_clauses = set.union(PCU1_clauses, C1_clauses)
+
+# simple_model = Model(all_clauses)
+
+# # Try out candidate propositions
+# candidate_props = set([Proposition('PCU1', 1, PCU1), Proposition('W', 1, W), Proposition('V', 1, V), Proposition('C1', 1, C1), Proposition('D', 0, D)])
+# for prop in candidate_props:
+#     prop.support = 'Given'
+
+# can_prop_options = generate_exhaustive_proposition_sets(simple_model, candidate_props)
+
+#print(test)
+
+# conflicts = check_model_for_conflicts(simple_model, can_prop_options)
+
+# print('output from model check: ', conflicts)
+
+'''
+Need to update the return_diagnosis function to:
+    - select the highest probability value from the component that excludes the conflict
+    - deal with our Classes
+'''
+# output_kernels = all_kernel_diagnoses(conflicts)
+# print('The generated kernels are: ', output_kernels)
+
+# best_kernel = find_highest_probability_kernel_set(output_kernels)
+# print('The best kernel is: ', best_kernel)
+
+def update_candidate_props(can_props, diagnosis):
+    props_to_remove = []
+    candidate_props = copy.copy(can_props)
+    for prop in candidate_props:
+        for diag_prop in diagnosis:
+            if prop.component == diag_prop.component:
+                props_to_remove.append(prop)
+    for diag_prop in diagnosis:
+        diag_prop.support = 'kernel'
+        candidate_props.add(diag_prop)
+    for prop in props_to_remove:
+       candidate_props.remove(prop)
+    return candidate_props
+
+# update_candidate_props(candidate_props, best_kernel)
+# print('updated candidate props are: ', candidate_props)
+
+# conflicts, candidate_props = check_model_for_conflicts(simple_model, candidate_props)
+# print('conflicts after applying kernel are: ', conflicts)
+
+def return_consistent_configurations(model, known_inputs, known_outputs, N):
+    # Initialize
+    used_kernels = []
+    consistent_configs = []
+    config_likelihoods = []
+    # (1) Start with highest probability component configurations
+    candidate_props = set()
+    for comp in known_inputs:
+        candidate_props.add(comp.get_max_proposition())
+    for comp in known_outputs:
+        candidate_props.add(comp.get_max_proposition())
+    for component in model.components:
+        if component.assignable:
+            candidate_props.add(component.get_max_proposition())
+    # Get possible can_props based on assignments:
+    #print('candidate props are: ', candidate_props)
+    can_prop_list = generate_exhaustive_proposition_sets(model, candidate_props)
+    # (2) Find satisfiable configurations until either (a) kernels exhausted or (b) find N solutions
+    #print('The can_prop_list is: ', can_prop_list)
+    # (2a) Check initial configuratin for conflicts
+    conflicts = check_model_for_conflicts(model, can_prop_list)
+    #print('The conflicts are: ', conflicts)
+    count = 0
+    still_kernels = True
+    if conflicts:
+        # Get kernels from the conflicts for the first hack at a configuration
+        output_kernels = all_kernel_diagnoses(conflicts)
+        print(output_kernels)
+        kernels_to_test = []
+        for kernel in output_kernels:
+            if kernel not in used_kernels:
+                kernels_to_test.append(kernel)
+        kernel_children_dict = {}
+        #print('\n\n')
+        #print('The kernels to test are: ', kernels_to_test)
+        idx = 0
+        while kernels_to_test and (count < N):
+            # Get the best diagnosis from the kernel set
+            best_kernel = find_highest_probability_kernel_set(kernels_to_test)
+            print('The best kernel is: ', best_kernel)
+            kernels_to_test.remove(best_kernel)
+            # Get updated propositions based on the selected kernel
+            #print('The seed props are: ', candidate_props)
+            #print('\n')
+
+            can_props = update_candidate_props(candidate_props, best_kernel)
+            # print('The updated props are: ', can_props)
+            # print('\n')
+            
+            # Update the used kernels
+            used_kernels.append(best_kernel)        
+            
+            # Get updated possibilities for intermediate variables:
+            can_prop_list = generate_exhaustive_proposition_sets(model, can_props)
+            #print('The updated can_prop_list is: ', can_prop_list)
+            
+            # Check the new proposition set to see if it induces conflicts
+            conflicts = check_model_for_conflicts(model, can_prop_list)
+            # print('The next set of conflicts is: ', conflicts)
+            
+            if not conflicts:
+                kernel_children_dict[idx] = None
+                # print('This config was consistent, ')
+                count += 1
+                consistent_configs.append(can_props)
+                config_likelihoods.append(compute_proposition_set_likelihood(can_props))
+            else:
+                # Kernels unique to this configuration
+                for conflict in conflicts:
+                    kid_kernels = update_kernel_diagnoses([best_kernel], conflict)
+                    kernel_children_dict[idx] = kid_kernels
+            idx += 1
+        if conflicts:
+            print('WARNING: problem is undiagnosable. You likely have an error in your proposition, clause, or component defintions.')
+        else:
+            return consistent_configs, config_likelihoods, not still_kernels
+    else:
+        print('The best diagnosis is that all hardware is functioning normally!')
+        consistent_configs.append(assignable_propositions(can_prop_list[0]))
+        config_likelihoods.append(compute_proposition_set_likelihood(can_prop_list[0]))
+        return consistent_configs, config_likelihoods, not still_kernels
+
+# known_inputs = set([V,W])
+# known_outputs = set([D])
+# N =5
+# results = return_consistent_configurations(simple_model, known_inputs, known_outputs, N)
+
+
 '''
 Attempt to build a simple model and conflict directed A*
 '''
@@ -801,162 +986,31 @@ Z = Component('Z',(0,1),(1,1), False)
 D = Component('D',(0,),(1,), False)
 E = Component('E',(1,),(1,), False)
 
-# Use our functions to build our model
-
-testP1 = build_Power_Relay_clauses(A, P1, V)
-
-testP2 = build_Power_Relay_clauses(B, P2, W)
-
-testP3 = build_Power_Relay_clauses(C, P3, X)
-
-testPCU1 = build_PCU_gate_clause([V,W],PCU1, Y)
-
-testPCU2 = build_PCU_gate_clause([W,X],PCU2, Z)
-
-testC1 = build_Camera_clauses(Y,C1,D)
-
-testC2 = build_Camera_clauses(Z,C2,E)
-
-'''
-Define simplified problem where V and W values are known
-'''
-V = Component('V',(1,),(1,), False)
-W = Component('W',(1,),(1,), False)
-D = Component('D',(0,),(1,), False)
-
-
-# PCU1 propositions and clauses
-props = [Proposition('PCU1',0, PCU1), Proposition('Y', 0, Y), Proposition('V', 1, V)]
-PCU1a = Clause('PCU1a',set(props))
-
-props = [Proposition('PCU1',0, PCU1), Proposition('Y', 0, Y), Proposition('W', 1, W)]
-PCU1b = Clause('PCU1b',set(props))
-
-props = [Proposition('PCU1',0, PCU1), Proposition('V', 0, V), Proposition('W', 0, W),Proposition('Y', 1, Y)]
-PCU1c = Clause('PCU1c',set(props))
-
-props = [Proposition('PCU1', 1, PCU1), Proposition('Y', 0, Y) , Proposition('V', 1, V), Proposition('W', 1, W)]
-PCU1d = Clause('PCU1d',set(props))
-
-PCU1_clauses = set([PCU1a, PCU1b, PCU1c, PCU1d])
-
-# C1 propositions and clauses
-props = [Proposition('C1',0, C1), Proposition('Y', 0, Y), Proposition('D', 1, D)]
-C1a = Clause('C1a', set(props))
-
-props = [Proposition('C1',0, C1), Proposition('D', 0, D), Proposition('Y', 1, Y)]
-C1b = Clause('C1b', set(props))
-
-C1_clauses = set([C1a, C1b])
-
-# Combine all clauses into a model
-all_clauses = set.union(PCU1_clauses, C1_clauses)
-
-simple_model = Model(all_clauses)
-
-# Try out candidate propositions
-candidate_props = set([Proposition('PCU1', 1, PCU1), Proposition('W', 1, W), Proposition('V', 1, V), Proposition('C1', 1, C1), Proposition('D', 0, D)])
-for prop in candidate_props:
-    prop.support = 'Given'
-
-test = generate_exhaustive_proposition_sets(simple_model, candidate_props)
-
-print(test)
-
-# conflicts, candidate_props = check_model_for_conflicts(simple_model, candidate_props)
-
-# print(conflicts)
-
-'''
-Need to update the return_diagnosis function to:
-    - select the highest probability value from the component that excludes the conflict
-    - deal with our Classes
-'''
-# output_kernels = all_kernel_diagnoses(conflicts)
-# #print(output_kernels)
-
-# best_diagnosis, corr_kernel = find_highest_probability_diagnosis_set(output_kernels)
-#print(best_diagnosis)
-
-def update_candidate_props(candidate_props, diagnosis):
-    props_to_remove = []
-    for prop in candidate_props:
-        for diag_prop in diagnosis:
-            if prop.component == diag_prop.component:
-                props_to_remove.append(prop)
-    for diag_prop in diagnosis:
-        diag_prop.support = 'kernel'
-        candidate_props.add(diag_prop)
-    for prop in props_to_remove:
-       candidate_props.remove(prop)
-    return candidate_props
-
-# update_candidate_props(candidate_props, best_diagnosis)
-# #print('updated candidate props are: ', candidate_props)
-
-# conflicts, candidate_props = check_model_for_conflicts(simple_model, candidate_props)
-# print('conflicts after applying kernel are: ', conflicts)
-
-def return_consistent_configurations(model, known_inputs, known_outputs, N):
-    # Initialize
-    used_kernels = []
-    consistent_configs = []
-    config_likelihoods = []
-    # (1) Start with highest probability component configurations
-    candidate_props = set()
-    for prop in known_inputs:
-        candidate_props.add(prop)
-    for prop in known_outputs:
-        candidate_props.add(prop)
-    for component in model.components:
-        candidate_props.add(component.get_max_proposition())
-    # (2) Find satisfiable configurations until either (a) kernels exhausted or (b) find N solutions
-    # (2) Check initial configuratin for conflicts
-    conflicts = check_model_for_conflicts(model, candidate_props)
-    count = 0
-    still_kernels = True
-    if conflicts:
-        while still_kernels and (count < N):
-            # Get kernels from the conflicts
-            output_kernels = all_kernel_diagnoses(conflicts)
-            # Get the best diagnosis from the kernel set
-            best_diagnosis, corr_kernel = find_highest_probability_diagnosis_set(output_kernels)
-            # Update the used kernels and remove the used kernel from the set
-            used_kernels.append(corr_kernel)
-            output_kernels.remove(corr_kernel)
-            if output_kernels:
-                still_kernels = True
-            else:
-                still_kernels = False
-            # Get updated propositions based on the selected kernel
-            candidate_props = update_candidate_props(candidate_props, best_diagnosis)
-            # Check the new proposition set to see if it induces conflicts
-            conflicts = check_model_for_conflicts(model, candidate_props)
-            if not conflicts:
-                count += 1
-                consistent_configs.append(candidate_props)
-                config_likelihoods.append(compute_proposition_set_likelihood(candidate_props))
-        if conflicts:
-            print('WARNING: problem is undiagnosable. You likely have an error in your proposition, clause, or component defintions.')
-        else:
-            return consistent_configs, config_likelihoods
-    else:
-        print('The best diagnosis is that all hardware is functioning normally!')
-        consistent_configs.append(candidate_props)
-        config_likelihoods.append(compute_proposition_set_likelihood(candidate_props))
-        return consistent_configs, config_likelihoods
-
-
-        
     
+'''
+Run Full Model
+'''
 
+P1 = build_Power_Relay_clauses(A, P1, V)
 
-# if conflicts:
-    
+P2 = build_Power_Relay_clauses(B, P2, W)
 
-# print(conflicts)
-# print('\n')
-# print(candidate_props)
-# print('\n')
-# print(support)
+P3 = build_Power_Relay_clauses(C, P3, X)
 
+PCU1 = build_PCU_gate_clause([V,W],PCU1, Y)
+
+PCU2 = build_PCU_gate_clause([W,X],PCU2, Z)
+
+C1 = build_Camera_clauses(Y,C1,D)
+
+C2 = build_Camera_clauses(Z,C2,E)
+
+model_clauses = set.union(P1, P2, P3, PCU1, PCU2, C1, C2)
+
+full_model = Model(model_clauses)
+
+known_inputs = set([A,B,C])
+known_outputs = set([D,E])
+N = 2
+results = return_consistent_configurations(full_model, known_inputs, known_outputs, 5)
+print(results)
