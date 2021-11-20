@@ -961,12 +961,13 @@ def return_consistent_configurations(model, known_inputs, known_outputs, N):
                 idx += 1
             if count < N:
                 # You have exhausted the seed kernels and must evaluate the children of some of the seeds to get N configs.
+                
                 seed_kernels = []
-                while not seed_kernels:
+                while n < (len(kernel_children_dict)-1):
                     n += 1
-                    seed_kernels = kernel_children_dict[n]
-                    if n > len(kernel_children_dict):
-                        break
+                    if kernel_children_dict[n]:
+                        for kern in kernel_children_dict[n]:
+                            seed_kernels.append(kern)
                 if seed_kernels:
                     return kernel_tester(consistent_configs, config_likelihoods, seed_kernels, used_kernels, kernel_children_dict, n)
                 else:
@@ -1043,6 +1044,6 @@ full_model = Model(model_clauses)
 known_inputs = set([A,B,C])
 known_outputs = set([D,E])
 N = 2
-results = return_consistent_configurations(full_model, known_inputs, known_outputs, 50)
-for config in results[0]:
-    print(config, '\n\n')
+results = return_consistent_configurations(full_model, known_inputs, known_outputs, 150)
+for likelihood in results[1]:
+    print(likelihood, '\n\n')
