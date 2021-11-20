@@ -307,7 +307,7 @@ def find_highest_probability_proposition(propositions, bias_mode1 = False):
             elif mode1_indices:
                 prop_choices = []
                 for idx in mode1_indices:
-                    prop_choices.append(props[idx])
+                    prop_choices.append(poss_props[idx])
                 return prop_choices
             else:
                 return poss_props
@@ -840,11 +840,7 @@ Need to update the return_diagnosis function to:
     - select the highest probability value from the component that excludes the conflict
     - deal with our Classes
 '''
-# output_kernels = all_kernel_diagnoses(conflicts)
-# print('The generated kernels are: ', output_kernels)
 
-# best_kernel = find_highest_probability_kernel_set(output_kernels)
-# print('The best kernel is: ', best_kernel)
 
 def update_candidate_props(can_props, diagnosis):
     props_to_remove = []
@@ -867,10 +863,47 @@ def update_candidate_props(can_props, diagnosis):
 # print('conflicts after applying kernel are: ', conflicts)
 
 def return_consistent_configurations(model, known_inputs, known_outputs, N):
+    '''
+
+    Parameters
+    ----------
+    model : Model class variable
+        This model should contain the clauses that describe the system of interest.
+        
+    known_inputs : Set of Component class variables.
+        These components should make up the known inputs into the system. As such each of these components should have only a single element domain.
+        
+    known_outputs : Set of Component class variables.
+        These components should make up the known outputs from the system. As such each of these components should have only a single element domain.
+        
+    N : Integer
+        The number of consistent configurations you want the function to return.
+
+    Returns
+    -------
+    consistent_configs : list wherin each element is a set of Proposition class variables
+        These sets correspond to a system configuration (proposition assignments for each component) that satisfy all clauses in the model.
+        
+    config_likelihoods : list of floats
+        Each element corresponds to the unnormalized probability of the the configuration of the corresponding element in consistent_configs
+        
+    used_kernels : list of sets of Proposition class variables
+        Each set in the list correponds to a kernel that was evaluated for consistency in the model.
+        
+    kernel_children_dict : dictionary whose values specify follow-on kernels (child kernels) for kernel assignments that did not satisfy the model
+        The keys correspond to the index in used_kernels of the corresponding kernel parent. The values for that key are the children of that kernel. This list of sets could be used as seed_kernels in a future call to the kernel_tester function.
+        
+    n : Integer
+        This integer corresponds to the index of the kernel in the used_kernels list that was last used to generate a list of seed_kernels from their children. For example, say used_kernels = [{A},{B},{C}] and n = 0. This would mean that the child kernels of kernel {A} (found by calling kernel_children_dict[0]) were the last list of kernels used as the list of seed_kernels.
+
+    '''
     # Initialize
     used_kernels = []
     consistent_configs = []
     config_likelihoods = []
+    seed_kernels = []
+    kernel_children_dict = {}
+    n = -1
     # (1) Start with highest probability component configurations
     candidate_props = set()
     for comp in known_inputs:
@@ -881,82 +914,79 @@ def return_consistent_configurations(model, known_inputs, known_outputs, N):
         if component.assignable:
             candidate_props.add(component.get_max_proposition())
     # Get possible can_props based on assignments:
-    #print('candidate props are: ', candidate_props)
     can_prop_list = generate_exhaustive_proposition_sets(model, candidate_props)
-    # (2) Find satisfiable configurations until either (a) kernels exhausted or (b) find N solutions
-    #print('The can_prop_list is: ', can_prop_list)
-    # (2a) Check initial configuratin for conflicts
+    # (2) Check initial configuratin for conflicts
     conflicts = check_model_for_conflicts(model, can_prop_list)
-    print('The conflicts are: ', conflicts)
-    count = 0
-    still_kernels = True
+    # (2) Find satisfiable configurations until either (a) kernels exhausted or (b) find N solutions
     if conflicts:
         # Get kernels from the conflicts for the first hack at a configuration
-        output_kernels = all_kernel_diagnoses(conflicts)
-        print(output_kernels)
-        kernels_to_test = []
-        for kernel in output_kernels:
-            if kernel not in used_kernels:
-                kernels_to_test.append(kernel)
-        kernel_children_dict = {}
-        #print('\n\n')
-        #print('The kernels to test are: ', kernels_to_test)
-        idx = 0
-        while kernels_to_test and (count < N):
-            # Get the best diagnosis from the kernel set
-            best_kernel = find_highest_probability_kernel_set(kernels_to_test)
-            print('The best kernel is: ', best_kernel)
-            kernels_to_test.remove(best_kernel)
-            # Get updated propositions based on the selected kernel
-            #print('The seed props are: ', candidate_props)
-            #print('\n')
+        seed_kernels = all_kernel_diagnoses(conflicts)
+        def kernel_tester(consistent_configs, config_likelihoods, seed_kernels, used_kernels, kernel_children_dict, n):
+            # Initialize variables
+            count = len(consistent_configs)
+            idx = len(used_kernels)
+            kernels_to_test = []
+                
+            for kernel in seed_kernels:
+                if kernel not in used_kernels:
+                    kernels_to_test.append(kernel)
 
-            can_props = update_candidate_props(candidate_props, best_kernel)
-            # print('The updated props are: ', can_props)
-            # print('\n')
-            
-            # Update the used kernels
-            used_kernels.append(best_kernel)        
-            
-            # Get updated possibilities for intermediate variables:
-            can_prop_list = generate_exhaustive_proposition_sets(model, can_props)
-            #print('The updated can_prop_list is: ', can_prop_list)
-            
-            # Check the new proposition set to see if it induces conflicts
-            conflicts = check_model_for_conflicts(model, can_prop_list)
-            # print('The next set of conflicts is: ', conflicts)
-            
-            if not conflicts:
-                kernel_children_dict[idx] = None
-                # print('This config was consistent, ')
-                count += 1
-                consistent_configs.append(can_props)
-                config_likelihoods.append(compute_proposition_set_likelihood(can_props))
+            while kernels_to_test and (count < N):
+                # Get the best diagnosis from the kernel set
+                best_kernel = find_highest_probability_kernel_set(kernels_to_test)
+                kernels_to_test.remove(best_kernel)
+                
+                # Get updated propositions based on the selected kernel
+                can_props = update_candidate_props(candidate_props, best_kernel)
+                
+                # Update the used kernels
+                used_kernels.append(best_kernel)        
+                
+                # Get updated possibilities for intermediate variables:
+                can_prop_list = generate_exhaustive_proposition_sets(model, can_props)
+                
+                # Check the new proposition set to see if it induces conflicts
+                conflicts = check_model_for_conflicts(model, can_prop_list)
+                
+                if not conflicts:
+                    kernel_children_dict[idx] = None
+                    count += 1
+                    consistent_configs.append(can_props)
+                    config_likelihoods.append(compute_proposition_set_likelihood(can_props))
+                else:
+                    # Kernels unique to this configuration
+                    for conflict in conflicts:
+                        kid_kernels = update_kernel_diagnoses([best_kernel], conflict)
+                        kernel_children_dict[idx] = kid_kernels
+                idx += 1
+            if count < N:
+                # You have exhausted the seed kernels and must evaluate the children of some of the seeds to get N configs.
+                seed_kernels = []
+                while not seed_kernels:
+                    n += 1
+                    seed_kernels = kernel_children_dict[n]
+                    if n > len(kernel_children_dict):
+                        break
+                if seed_kernels:
+                    return kernel_tester(consistent_configs, config_likelihoods, seed_kernels, used_kernels, kernel_children_dict, n)
+                else:
+                    print('You have found exhuasted the kernels and found fewer than the requested {N} satisfiable configurations'.format(N=N))
+                    return consistent_configs, config_likelihoods, used_kernels, kernel_children_dict, n
+
             else:
-                # Kernels unique to this configuration
-                for conflict in conflicts:
-                    kid_kernels = update_kernel_diagnoses([best_kernel], conflict)
-                    kernel_children_dict[idx] = kid_kernels
-            idx += 1
-
-        if count < N:
-            return consistent_configs, config_likelihoods, not still_kernels
-        else:
-            return consistent_configs, config_likelihoods, not still_kernels
+                print('Returning the {N} most likely satisfiable configurations.'.format(N=N))
+                return consistent_configs, config_likelihoods, used_kernels, kernel_children_dict, n
+        
+        # Call the kernel tester_function
+        return kernel_tester(consistent_configs, config_likelihoods, seed_kernels, used_kernels, kernel_children_dict, n)
     else:
         print('The best diagnosis is that all hardware is functioning normally!')
         consistent_configs.append(assignable_propositions(can_prop_list[0]))
         config_likelihoods.append(compute_proposition_set_likelihood(can_prop_list[0]))
-        return consistent_configs, config_likelihoods, not still_kernels
-
-# known_inputs = set([V,W])
-# known_outputs = set([D])
-# N =5
-# results = return_consistent_configurations(simple_model, known_inputs, known_outputs, N)
-
+        return consistent_configs, config_likelihoods, used_kernels, kernel_children_dict, n
 
 '''
-Attempt to build a simple model and conflict directed A*
+Example of conflict directed A*
 '''
 # Define components
 P1 = Component('P1',(0,1),(0.015,0.985), True)
@@ -1013,5 +1043,6 @@ full_model = Model(model_clauses)
 known_inputs = set([A,B,C])
 known_outputs = set([D,E])
 N = 2
-results = return_consistent_configurations(full_model, known_inputs, known_outputs, 5)
-print(results)
+results = return_consistent_configurations(full_model, known_inputs, known_outputs, 50)
+for config in results[0]:
+    print(config, '\n\n')
