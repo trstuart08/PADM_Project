@@ -53,12 +53,15 @@ class Graph(object):
                 node2_edges.add(Edge(node2, node1, weight))
                 self._edges[node2] = node2_edges
     def delete_edge(self, child):
+        # Delete is working
         flag = 0
-        for node in self._edges:
-            node_edges = self._edges.get(node)
+        for node in self._edges.keys():
+            node_edges = self._edges[node]
             if node == child:
                 self._edges.pop(node)
                 flag = 1
+                break
+            if flag == 1:
                 break
             #for edge in node_edges:
             #    if edge.source == child:
