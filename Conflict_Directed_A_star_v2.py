@@ -155,7 +155,18 @@ class Proposition:
             self.prob = self.component.probs[prob_index]
         else:
             self.prob = 0
-        
+    
+    def __key(self):
+        return (self.mode, self.component)
+    
+    def __hash__(self):
+        return hash(self.__key())
+    
+    def __eq__(self, other):
+        if isinstance(other, Proposition):
+            return self.__key() == other.__key()
+        return NotImplemented
+    
     def __str__(self):
         return '(' + self.name + ', ' + str(self.mode) + ')'
     
@@ -420,7 +431,7 @@ def generate_exhaustive_proposition_sets(model, candidate_propositions):
     return all_can_props
   
 
-def logical_test(clause, can_props, debug_mode = False):
+def logical_test(clause, can_props):
     '''
     logical_test(clause, can_props): Tests if the propositions in can_props are logically consistent with the clause.
     ----------------------------------------------------------------------
@@ -488,10 +499,7 @@ def logical_test(clause, can_props, debug_mode = False):
     log_test_result = any(clause_logic_list)
     if log_test_result:
         #print('returning with log_test_result = True')
-        if not debug_mode:
-            return conflicts
-        else:
-            return conflicts, can_props, log_test_result, clause_logic_list
+        return conflicts
     
        # (4) if log_test result is False and every element in unassigned_list is False, then we have identified conflicts
     else:
@@ -500,47 +508,27 @@ def logical_test(clause, can_props, debug_mode = False):
         for idx in False_indices:
             if prop_list[idx].component.assignable:
                 conflicts.add(can_prop_list[idx])
-        # Additional conflicts are proposition assignments whose support does not correspond to a given (e.g. does NOT correspond to a known input or output value)
-        # for can_prop in can_props:
-        #     if (can_prop.support != 'Given') and (can_prop.support != 'kernel'):    # can_prop.support is a Clause class variable or 'Given'
-        #         #print('we are inside the support build')
-        #         #print(can_prop.support)
-        #         additional_conflicts = assignable_propositions(can_prop.support.props)
-        #         #print(additional_conflicts)
-        #         if additional_conflicts:
-        #             for prop in additional_conflicts:
-        #                 conflicts.add(prop)
-        if not debug_mode:
-            #print('\n LOOK AT ME \n')
-            return conflicts
-        else:
-            # print('\n LOOK AT ME \n')
-            return conflicts, can_props, log_test_result, clause_logic_list
-        
+        return conflicts
          
-def check_model_for_conflicts(model, candidate_props):
+def check_model_for_conflicts(model, all_can_props):
     '''
 
     Parameters
     ----------
     model : Model class variable
     
-    candidate_props : a list of sets of Proposition class varibles
+    all_can_props : a list of sets of Proposition class varibles
         Each set should exhaustively make assignments to the model components
 
     Returns
     -------
-    conflicts : list of Proposition class variables
-        Each of these propositions is a conflict between a proposition in candidate_props and the clauses in the model
-    candidate_props : set of proposition class variables
-        The candidate propositions 
+    [] or poss_conflicts : an empty list or a list of Proposition class variables
+        An empty list is returned if any set of propositions in all_can_props satisfies the model. Otherwise, each of the propositions in poss_conflicts is a conflict between a proposition in all_can_props and the clauses in the model
 
     '''
     poss_conflicts = set()
-    satisfied_list = []
-    for prop_set in candidate_props:
+    for prop_set in all_can_props:
         satisfiable = True
-        #print('Looking at the prop_set: ', prop_set)
         for clause in model.clauses:
            new_conflicts  = logical_test(clause, prop_set)
            if new_conflicts:
@@ -548,13 +536,8 @@ def check_model_for_conflicts(model, candidate_props):
                for conflict in new_conflicts:
                    poss_conflicts.add(conflict)
         if satisfiable:
-            satisfied_list.append(True)
-        else:
-            satisfied_list.append(False)
-    if any(satisfied_list):
-        return []
-    else:
-        return [poss_conflicts]
+            return []
+    return [poss_conflicts]
         
 
 
@@ -563,6 +546,19 @@ Functions for kernel generation and processing
 '''
 # function to invert a conflict set into set of diagnoses
 def return_diagnoses(conflicts):
+    '''
+
+    Parameters
+    ----------
+    conflicts : A set of Proposition class variables.
+        These conflicts capture the inconsistencies between a set of component assignments and the propositional logic of the system model.
+
+    Returns
+    -------
+    diagnoses : A set of Proposition class variables.
+        This set encapsulates the possible modes that the components that generated the conflicts can take on. This is determined by excluding the conflict modes.
+
+    '''
     diagnoses = set()
     # (1) Identify components in conflicts
     conflict_components = get_components(conflicts)
@@ -580,6 +576,20 @@ def return_diagnoses(conflicts):
     return diagnoses
 
 def update_kernel_diagnoses(kernel_diagnoses, conflicts):
+    '''
+    Parameters
+    ----------
+    kernel_diagnoses: A list of sets of Proposition class variables
+        Each set of Proposition class variables constitutes a kernel.
+    conflicts : A set of Proposition class variables.
+        These conflicts capture the inconsistencies between a set of component assignments and the propositional logic of the system model.
+
+    Returns
+    -------
+    output_kernel_diagnoses : A list of sets of Proposition class variables.
+        Each set of Proposition class variables constitutes a kernel. These output kernels result from updateing the input kernel_diagnoses with the conflicts set such that no kernel set in the output list is a superset of any other kernels. Moreover, these kernel sets document all the conflicts identified to date by any tests of the model against candidate proposition sets.
+    '''
+    
     # create output variable
     output_kernel_diagnoses = []
    
@@ -648,7 +658,7 @@ def find_highest_probability_kernel_set(kernels):
 Functions specific to our hardware system
 '''
 # Function to build AND gate clauses
-def build_PCU_gate_clause(input_components, AND_gate_component, output_component):
+def build_PCU_gate_clauses(input_components, AND_gate_component, output_component):
     clauses = set()
     
     #######################################################################
@@ -776,9 +786,9 @@ def build_Camera_clauses(input_component, camera, output_component):
 
 # testP3 = build_Power_Relay_clauses(C, P3, X)
 
-# testPCU1 = build_PCU_gate_clause([V,W],PCU1, Y)
+# testPCU1 = build_PCU_gate_clauses([V,W],PCU1, Y)
 
-# testPCU2 = build_PCU_gate_clause([W,X],PCU2, Z)
+# testPCU2 = build_PCU_gate_clauses([W,X],PCU2, Z)
 
 # testC1 = build_Camera_clauses(Y,C1,D)
 
@@ -862,19 +872,59 @@ def update_candidate_props(can_props, diagnosis):
 # conflicts, candidate_props = check_model_for_conflicts(simple_model, candidate_props)
 # print('conflicts after applying kernel are: ', conflicts)
 
+def add_more_kernels(kernel_diagnoses, more_kernels):
+    '''
+    Parameters
+    ----------
+    kernel_diagnoses: A list of sets of Proposition class variables
+        Each set of Proposition class variables constitutes a kernel.
+    more_kernels : A set of Proposition class variables.
+        These are additional kernel sets you want to add to the list of kernel sets in kernel_diagnoses.
+
+    Returns
+    -------
+    output_kernel_diagnoses : A list of sets of Proposition class variables.
+        Each set of Proposition class variables constitutes a kernel. These output kernels result from updateing the input kernel_diagnoses with the conflicts set such that no kernel set in the output list is a superset of any other kernels. Moreover, these kernel sets document all the conflicts identified to date by any tests of the model against candidate proposition sets.
+    '''
+    
+    # create output variable
+    output_kernel_diagnoses = []
+    
+    # 0. Check to see if kernel_diagnoses is empty, if so add each kernel to the output
+    if len(kernel_diagnoses) == 0:
+        for kernel in more_kernels:
+            output_kernel_diagnoses.append(kernel)
+        
+    else:
+        for kernel in more_kernels:
+    # 1. For each kernel in more_kernels, check to see if it is already represented in kernel_diagnoses, if it is then do not add it.
+            elim_list = []
+            for seed_kernel in kernel_diagnoses:
+                if kernel.issubset(seed_kernel):
+                    elim_list.append(kernel)    # Track for removal from the diagnoses set
+            
+        for elem in elim_list:
+           more_kernels.remove(elem)
+            
+    #2. Add remaining kernels in more_kernels to the seed_kernel list i
+        for rem_kernel in more_kernels:
+            output_kernel_diagnoses.append(rem_kernel)
+    return output_kernel_diagnoses
+
 def return_consistent_configurations(model, known_inputs, known_outputs, N):
     '''
-
     Parameters
     ----------
     model : Model class variable
         This model should contain the clauses that describe the system of interest.
         
     known_inputs : Set of Component class variables.
-        These components should make up the known inputs into the system. As such each of these components should have only a single element domain.
+        These components should make up the known inputs into the system. As such each of these components should have only a 
+        single element domain.
         
     known_outputs : Set of Component class variables.
-        These components should make up the known outputs from the system. As such each of these components should have only a single element domain.
+        These components should make up the known outputs from the system. As such each of these components should have only a 
+        single element domain.
         
     N : Integer
         The number of consistent configurations you want the function to return.
@@ -882,19 +932,26 @@ def return_consistent_configurations(model, known_inputs, known_outputs, N):
     Returns
     -------
     consistent_configs : list wherin each element is a set of Proposition class variables
-        These sets correspond to a system configuration (proposition assignments for each component) that satisfy all clauses in the model.
+        These sets correspond to a system configuration (proposition assignments for each component) that satisfy all clauses in
+        the model.
         
     config_likelihoods : list of floats
-        Each element corresponds to the unnormalized probability of the the configuration of the corresponding element in consistent_configs
+        Each element corresponds to the unnormalized probability of the the configuration of the corresponding element in 
+        consistent_configs
         
     used_kernels : list of sets of Proposition class variables
         Each set in the list correponds to a kernel that was evaluated for consistency in the model.
         
-    kernel_children_dict : dictionary whose values specify follow-on kernels (child kernels) for kernel assignments that did not satisfy the model
-        The keys correspond to the index in used_kernels of the corresponding kernel parent. The values for that key are the children of that kernel. This list of sets could be used as seed_kernels in a future call to the kernel_tester function.
+    kernel_children_dict : dictionary whose values specify follow-on kernels (child kernels) for kernel assignments that did not
+    satisfy the model
+        The keys correspond to the index in used_kernels of the corresponding kernel parent. The values for that key are the 
+        children of that kernel. This list of sets could be used as seed_kernels in a future call to the kernel_tester function.
         
     n : Integer
-        This integer corresponds to the index of the kernel in the used_kernels list that was last used to generate a list of seed_kernels from their children. For example, say used_kernels = [{A},{B},{C}] and n = 0. This would mean that the child kernels of kernel {A} (found by calling kernel_children_dict[0]) were the last list of kernels used as the list of seed_kernels.
+        This integer corresponds to the index of the kernel in the used_kernels list that was last used to add to the list of 
+        seed_kernels from their children. For example, say used_kernels = [{A},{B},{C}] and n = 0. This would mean that the 
+        child kernels of kernel {A} (found by calling kernel_children_dict[0]) were the last list of kernels used to add to the 
+        list of seed_kernels.
 
     '''
     # Initialize
@@ -915,9 +972,9 @@ def return_consistent_configurations(model, known_inputs, known_outputs, N):
             candidate_props.add(component.get_max_proposition())
     # Get possible can_props based on assignments:
     can_prop_list = generate_exhaustive_proposition_sets(model, candidate_props)
-    # (2) Check initial configuratin for conflicts
+    # (2) Check initial configuration for conflicts
     conflicts = check_model_for_conflicts(model, can_prop_list)
-    # (2) Find satisfiable configurations until either (a) kernels exhausted or (b) find N solutions
+    # (3) Find satisfiable configurations until either (a) kernels exhausted or (b) find N solutions
     if conflicts:
         # Get kernels from the conflicts for the first hack at a configuration
         seed_kernels = all_kernel_diagnoses(conflicts)
@@ -967,7 +1024,8 @@ def return_consistent_configurations(model, known_inputs, known_outputs, N):
                     n += 1
                     if kernel_children_dict[n]:
                         for kern in kernel_children_dict[n]:
-                            seed_kernels.append(kern)
+                            if kern not in seed_kernels:
+                                seed_kernels.append(kern)
                 if seed_kernels:
                     return kernel_tester(consistent_configs, config_likelihoods, seed_kernels, used_kernels, kernel_children_dict, n)
                 else:
@@ -1016,7 +1074,7 @@ Z = Component('Z',(0,1),(1,1), False)
 
     # Outputs
 D = Component('D',(0,),(1,), False)
-E = Component('E',(1,),(1,), False)
+E = Component('E',(0,),(1,), False)
 
     
 '''
@@ -1029,9 +1087,9 @@ P2 = build_Power_Relay_clauses(B, P2, W)
 
 P3 = build_Power_Relay_clauses(C, P3, X)
 
-PCU1 = build_PCU_gate_clause([V,W],PCU1, Y)
+PCU1 = build_PCU_gate_clauses([V,W],PCU1, Y)
 
-PCU2 = build_PCU_gate_clause([W,X],PCU2, Z)
+PCU2 = build_PCU_gate_clauses([W,X],PCU2, Z)
 
 C1 = build_Camera_clauses(Y,C1,D)
 
@@ -1044,6 +1102,6 @@ full_model = Model(model_clauses)
 known_inputs = set([A,B,C])
 known_outputs = set([D,E])
 N = 2
-results = return_consistent_configurations(full_model, known_inputs, known_outputs, 150)
+results = return_consistent_configurations(full_model, known_inputs, known_outputs, 10)
 for likelihood in results[1]:
     print(likelihood, '\n\n')
